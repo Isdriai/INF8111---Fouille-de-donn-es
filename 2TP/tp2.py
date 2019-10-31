@@ -5,46 +5,75 @@ from scipy import stats as st
 
 filename = "tweets.csv"
 
-dataset = pd.read_csv(filename)
+dataset = pd.read_csv(filename, sep=";")
 
-size_sample = 1000000
-
-def get_sample():
-    return dataset["text"].sample(n=size_sample) # Nous prenons seulement le texte de chaque tweet
-
-sample = get_sample()
+size_sample = 200
+sample = dataset["text"].sample(n=size_sample)
 
 # https://medium.com/data-science-journal/how-to-correctly-select-a-sample-from-a-huge-dataset-in-machine-learning-24327650372c
 # https://towardsdatascience.com/inferential-statistics-series-t-test-using-numpy-2718f8f9bf2f
 
-# p value > 5% => ok
+tweets = sample.copy()
 
-while st.ttest_1samp(sample, 0)[1] < 0.05:
-    sample = get_sample()
+import re
 
-# garder les noms
-for index, row in df.iterrows():
-    row["text"] = nltk.pos_tag(word_tokenize(row["text"])) 
+for index, tweet in tweets.items():
+    tweets[index] = re.sub(r"(http|@|#)\S*", "", tweet).lower() # URL/account/hashtag remove + lower
 
-# bigram nom nom
+print(tweets)
 
-# TF IDF
+from googletrans import Translator
+
+list_text = list(map(lambda t: t[1], tweets.items()))
+
+lt_chunks = []
+chunk = []
+down = size_sample
+for lt in list_text:
+    chunk.append(lt)
+    down -= 1
+    if (len(chunk) == 30 or down == 0):
+        lt_chunks.append(chunk)
+        chunk = []
+
+"""
+translations = []
+for c in lt_chunks:
+    translations += Translator().translate(list_text)
+
+i = 0
+for index, tweet in tweets.items():
+    tweets[index] = translations[i]
+    i += 1
+"""
+
+for index, tweet in tweets.items():
+    tokens = nltk.word_tokenize(tweet)
+    tags = nltk.pos_tag(tokens)
+    tweets[index] = " ".join([word for word,pos in tags if (pos == 'NN' or pos == 'NNP' or pos == 'NNS' or pos == 'NNPS')])
 
 
+from sklearn.feature_extraction.text import TfidfVectorizer
+tfidf = TfidfVectorizer(ngram_range=(1,2))
+tweets_tfidf = tfidf.fit_transform(tweets)
+
+from sklearn.cluster import KMeans
+
+Kmeans = []
+for k in range(4, 10):
+    Kmeans.append(KMeans(n_clusters=k).fit(tweets_tfidf))
 # correction de bruit
 
-# comparaison vect word
-
-# k allant de 1 à 30
-# k mean 
-# regarder les k ou il y a une grande diff
-
 # regarder a la main quelques k qui semblent etre le point d'inflexion
+# TSNE
 
-# test => pk pas regarder la distribution par rapport aux topics,
+# regarder les mots les plus présents dans les clusters et voitr si ils font sens
+
 # les hashtags communs d'un topic doivent etre concentré sur ce topic 
+
 # https://stats.stackexchange.com/questions/79028/performance-metrics-to-evaluate-unsupervised-learning
 
+# differentes langues
+# https://pypi.org/project/googletrans/
 
-
-
+# word to vect
