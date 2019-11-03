@@ -2,110 +2,67 @@ import nltk
 import numpy as np
 import pandas as pd
 from scipy import stats as st
+import re
+from nltk.stem import WordNetLemmatizer
+from joblib import Parallel, delayed
+import multiprocessing
+import matplotlib.pyplot as plt
+from sklearn.cluster import KMeans
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.feature_extraction.text import TfidfTransformer
+from sklearn.feature_extraction.text import TfidfVectorizer
+from nltk.stem import WordNetLemmatizer
+from sklearn.decomposition import TruncatedSVD
+
 
 filename = "tweets_lang.csv"
 
-
 dataset = pd.read_csv(filename, sep=";")
+# On ne garde que les tweets en anglais et ceux qui n'ont pas été coupés
+dataset = dataset[(dataset["lang"] == "en") & (dataset["truncated"] == False)]
 print("fin dataset")
 
 size_sample = 100000
 
-labels = ["text", "lang", "truncated"]
+lemmatizer = WordNetLemmatizer()
+def clean_tweet(tweet):
+    clean = re.sub(r"(http|@|#)\S*", "", tweet.lower())
+    tokens = nltk.word_tokenize(re.sub(r"rt", "", clean))
+    tags = nltk.pos_tag(tokens)
+    nouns = [word for word,pos in tags if (pos == 'NN' or pos == 'NNP' or pos == 'NNS' or pos == 'NNPS')]
+    return " ".join([lemmatizer.lemmatize(noun) for noun in nouns])
 
-sample = dataset.sample(n=size_sample)[labels]
-sample = sample[(sample["lang"] == "en") & (sample["truncated"] == False)]
-
-print("fin sample")
-
-# https://medium.com/data-science-journal/how-to-correctly-select-a-sample-from-a-huge-dataset-in-machine-learning-24327650372c
-# https://towardsdatascience.com/inferential-statistics-series-t-test-using-numpy-2718f8f9bf2f
-
-tweets = sample["text"].copy()
-
-import re
-
-for index, tweet in tweets.items():
-    tweets[index] = re.sub(r"(http|@|#)\S*", "", tweet).lower() # URL/account/hashtag remove + lower
+sample = dataset.sample(n=size_sample)["text"]
+sample = sample.map(lambda tweet: clean_tweet(tweet))
 
 print("fin clean")
 
+tfidf = TfidfVectorizer()
+tweets_tfidf = tfidf.fit_transform(sample)
 
-from nltk.stem.snowball import SnowballStemmer
-stemmer = SnowballStemmer("english", ignore_stopwords=True)
+print("fin tfidf")
 
-for index, tweet in tweets.items():
-    tokens = nltk.word_tokenize(tweet)
-    tags = nltk.pos_tag(tokens)
-    tweets[index] = " ".join([stemmer.stem(word) for word,pos in tags if (pos == 'NN' or pos == 'NNP' or pos == 'NNS' or pos == 'NNPS')])
+svd = TruncatedSVD(n_components=20)
+tweets_svd = svd.fit_transform(tweets_tfidf)
 
-print("fin noms + stem")
+print("fin svd")
 
-percent = 0.50
-chunk = int(len(tweets)*percent)
-train = tweets.iloc[:chunk]
-test = tweets.iloc[chunk:]
-
-from sklearn.feature_extraction.text import TfidfVectorizer
-tfidf = TfidfVectorizer(ngram_range=(1,2))
-tweets_train_tfidf = tfidf.fit_transform(train)
-
-print("fin td idf")
-
-from sklearn.cluster import KMeans
-
-ran = range(1, 21)
+ran = range(1, 162, 20)
 ks = list(ran)
 
-from joblib import Parallel, delayed
-import multiprocessing
-num_cores = multiprocessing.cpu_count()
-
-def kgo(k):
-    print ("kmeans " + str(k))
-    res = KMeans(n_clusters=k).fit(tweets_train_tfidf)
-    print ("kmeans " + str(k) + " fini")
+def kmeans_go(k):
+    print("kmeans " + str(k))
+    res = KMeans(n_clusters=k).fit(tweets_svd)
+    print("kmeans " + str(k) + " fini")
     return res
 
-Kmeans = Parallel(n_jobs=num_cores)(delayed(kgo)(i) for i in ran)
-
-"""def group(kmean, data):
-    pred = kmean.predict(data)
-    res = {}
-    index = 0
-    for p in pred:
-        if p in res:
-            res[p].append(index)
-        else:
-            res[p] = [index]
-        index += 1
-    return res"""
-
-import matplotlib.pyplot as plt
+num_cores = multiprocessing.cpu_count()
+Kmeans = Parallel(n_jobs=num_cores-1)(delayed(kmeans_go)(i) for i in ran)
 
 inerties = []
 
-for k in ks:
-    inerties.append(Kmeans[k-ks[0]].inertia_)
+for k in Kmeans:
+    inerties.append(k.inertia_)
 
-plt.plot([ k - 4 for k in ks], inerties, 'o-')
+plt.plot(ks, inerties, 'o-')
 plt.show()
-
-
-print("fin")
-# correction de bruit
-
-# regarder a la main quelques k qui semblent etre le point d'inflexion
-# TSNE
-
-# regarder les mots les plus présents dans les clusters et voitr si ils font sens
-
-# les hashtags communs d'un topic doivent etre concentré sur ce topic 
-
-# https://stats.stackexchange.com/questions/79028/performance-metrics-to-evaluate-unsupervised-learning
-
-# differentes langues
-# https://pypi.org/project/googletrans/
-
-# word to vect
-
