@@ -13,6 +13,9 @@ from sklearn.feature_extraction.text import TfidfTransformer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from nltk.stem import WordNetLemmatizer
 from sklearn.decomposition import TruncatedSVD
+from collections import Counter
+import csv
+
 
 
 filename = "tweets_lang.csv"
@@ -41,13 +44,13 @@ tfidf = TfidfVectorizer()
 tweets_tfidf = tfidf.fit_transform(sample)
 
 print("fin tfidf")
-
-svd = TruncatedSVD(n_components=20)
+'''
+svd = TruncatedSVD(n_components=1)
 tweets_svd = svd.fit_transform(tweets_tfidf)
 
 print("fin svd")
 
-ran = range(1, 162, 20)
+ran = range(1, 11, 1)
 ks = list(ran)
 
 def kmeans_go(k):
@@ -66,3 +69,35 @@ for k in Kmeans:
 
 plt.plot(ks, inerties, 'o-')
 plt.show()
+
+
+def most_common_words(tweets_svd, kmean, sample, n_words = 10):
+    common_words = {}
+    predict = kmean.predict(tweets_svd)
+    df = pd.DataFrame({'label': predict, 'article': range(len(sample))})
+    for k in range(kmean.n_clusters):
+        index = list(df[df['label']==k]['article'])
+        list_words = []
+        for tweet in sample.iloc[index]:
+            list_words += tweet.split()
+        counter = Counter(list_words)
+        common_words[k] = counter.most_common()[:n_words]
+    return common_words
+
+
+
+for i, words in most_common_words(tweets_svd, Kmeans[1], sample).items():
+    print("mots les plus communs ds le cluster " + str(i) +" :")
+    for word in words:
+        print("    " + word, end = "")
+        
+
+for kmean
+for k in range(kmean.n_clusters):
+    predict = kmean.predict(tweets_svd)
+    df = pd.DataFrame({'label': predict, 'article': range(size_sample)})
+    index = list(df[df['label']==k]['article'])
+    with open("tweets_cluster_" + str(k) + ".csv", 'w') as f:
+        file = csv.writer(f, delimiter=' ')
+        file.writerows(sample.iloc[index])
+        '''
