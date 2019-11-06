@@ -15,6 +15,11 @@ from nltk.stem import WordNetLemmatizer
 from sklearn.decomposition import TruncatedSVD
 from collections import Counter
 import csv
+from sklearn.cluster import MiniBatchKMeans
+from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
+import matplotlib.cm as cm
+
 
 
 
@@ -38,66 +43,66 @@ def clean_tweet(tweet):
 sample = dataset.sample(n=size_sample)["text"]
 sample = sample.map(lambda tweet: clean_tweet(tweet))
 
-print("fin clean")
 
-tfidf = TfidfVectorizer()
+tfidf = TfidfVectorizer(
+    min_df = 5,
+    max_df = 0.95,
+    max_features = 9000,
+    stop_words = 'english'
+)
 tweets_tfidf = tfidf.fit_transform(sample)
 
 print("fin tfidf")
-'''
-svd = TruncatedSVD(n_components=1)
-tweets_svd = svd.fit_transform(tweets_tfidf)
 
-print("fin svd")
 
-ran = range(1, 11, 1)
-ks = list(ran)
+def find_optimal_clusters(data, max_k):
+    iters = range(2, max_k+1)
+    
+    sse = []
+    for k in iters:
+        sse.append(MiniBatchKMeans(n_clusters=k, init_size=1024, batch_size=2048, random_state=20).fit(data).inertia_)
+        print('Fit {} clusters'.format(k))
+        
+    return sse
 
-def kmeans_go(k):
-    print("kmeans " + str(k))
-    res = KMeans(n_clusters=k).fit(tweets_svd)
-    print("kmeans " + str(k) + " fini")
-    return res
+s = find_optimal_clusters(tweets_tfidf, 100)
+nbr_clusters = index_min = min(range(len(s)), key=s.__getitem__)
+clusters = MiniBatchKMeans(n_clusters=nbr_clusters, init_size=1024, batch_size=2048, random_state=20).fit_predict(tweets_tfidf)
 
-num_cores = multiprocessing.cpu_count()
-Kmeans = Parallel(n_jobs=num_cores-1)(delayed(kmeans_go)(i) for i in ran)
+def plot_tsne_pca(data, labels):
+    max_label = max(labels)
+    max_items = np.random.choice(range(data.shape[0]), size=3000, replace=False)
+    
+    pca = PCA(n_components=2).fit_transform(data[max_items,:].todense())
+    pp = PCA(n_components=50)
+    tsne = TSNE().fit_transform(pp.fit_transform(data[max_items,:].todense()))
+    
+    idx = np.random.choice(range(pca.shape[0]), size=300, replace=False)
+    label_subset = labels[max_items]
+    label_subset = [cm.hsv(i/max_label) for i in label_subset[idx]]
+    
+    f, ax = plt.subplots(1, 2, figsize=(14, 6))
+    
+    ax[0].scatter(pca[idx, 0], pca[idx, 1], c=label_subset)
+    ax[0].set_title('PCA Cluster Plot')
+    
+    ax[1].scatter(tsne[idx, 0], tsne[idx, 1], c=label_subset)
+    ax[1].set_title('TSNE Cluster Plot')
 
-inerties = []
-
-for k in Kmeans:
-    inerties.append(k.inertia_)
-
-plt.plot(ks, inerties, 'o-')
+    return pp.explained_variance_
+    
+variance = plot_tsne_pca(tweets_tfidf, clusters)
 plt.show()
 
+plt.plot(range(len(variance)), variance)
+plt.show()
 
-def most_common_words(tweets_svd, kmean, sample, n_words = 10):
-    common_words = {}
-    predict = kmean.predict(tweets_svd)
-    df = pd.DataFrame({'label': predict, 'article': range(len(sample))})
-    for k in range(kmean.n_clusters):
-        index = list(df[df['label']==k]['article'])
-        list_words = []
-        for tweet in sample.iloc[index]:
-            list_words += tweet.split()
-        counter = Counter(list_words)
-        common_words[k] = counter.most_common()[:n_words]
-    return common_words
+def get_top_keywords(data, clusters, labels, n_terms):
+    df = pd.DataFrame(data.todense()).groupby(clusters).mean()
+    
+    for i,r in df.iterrows():
+        print('\nCluster {}'.format(i))
+        print(','.join([labels[t] for t in np.argsort(r)[-n_terms:]]))
+            
+get_top_keywords(tweets_tfidf, clusters, tfidf.get_feature_names(), 10)
 
-
-
-for i, words in most_common_words(tweets_svd, Kmeans[1], sample).items():
-    print("mots les plus communs ds le cluster " + str(i) +" :")
-    for word in words:
-        print("    " + word, end = "")
-        
-
-for kmean
-for k in range(kmean.n_clusters):
-    predict = kmean.predict(tweets_svd)
-    df = pd.DataFrame({'label': predict, 'article': range(size_sample)})
-    index = list(df[df['label']==k]['article'])
-    with open("tweets_cluster_" + str(k) + ".csv", 'w') as f:
-        file = csv.writer(f, delimiter=' ')
-        file.writerows(sample.iloc[index])
-        '''
