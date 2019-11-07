@@ -19,6 +19,10 @@ from sklearn.cluster import MiniBatchKMeans
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 import matplotlib.cm as cm
+from sklearn.decomposition import SparsePCA
+import seaborn as sns
+from sklearn.datasets import load_digits
+from tsne import bh_sne
 
 
 
@@ -35,25 +39,35 @@ size_sample = 100000
 lemmatizer = WordNetLemmatizer()
 def clean_tweet(tweet):
     clean = re.sub(r"(http|@|#)\S*", "", tweet.lower())
-    tokens = nltk.word_tokenize(re.sub(r"rt", "", clean))
+    tokens = nltk.word_tokenize(re.sub(r"rt|”|'s|—|'|\.|,|\"|%|`|’|‘|–|\||“|▸", "", clean))
     tags = nltk.pos_tag(tokens)
-    nouns = [word for word,pos in tags if (pos == 'NN' or pos == 'NNP' or pos == 'NNS' or pos == 'NNPS')]
+    nouns = [word for word,pos in tags if ((pos == 'NN' or pos == 'NNP' or pos == 'NNS' or pos == 'NNPS' ) and word != "i" and word != "s")]
     return " ".join([lemmatizer.lemmatize(noun) for noun in nouns])
 
 sample = dataset.sample(n=size_sample)["text"]
-sample = sample.map(lambda tweet: clean_tweet(tweet))
+sample = sample.map(clean_tweet)
 
+del dataset
 
 tfidf = TfidfVectorizer(
-    min_df = 5,
-    max_df = 0.95,
-    max_features = 9000,
+    ngram_range=(1,2),
     stop_words = 'english'
 )
 tweets_tfidf = tfidf.fit_transform(sample)
 
 print("fin tfidf")
 
+items = np.random.choice(range(size_sample), size=3000)
+
+components = 20
+SVD = SparsePCA(n_components = components)
+SVD.fit(tweets_tfidf[items].toarray())
+tweets_svd = SVD.transform(tweets_tfidf)
+
+plt.bar(range(components), SVD.explained_variance_)
+plt.show() # on voit un groupe de 3, un autre de 3 donc 6 et si on prend large, 9/10
+
+print("fin svd")
 
 def find_optimal_clusters(data, max_k):
     iters = range(2, max_k+1)
@@ -65,44 +79,41 @@ def find_optimal_clusters(data, max_k):
         
     return sse
 
-s = find_optimal_clusters(tweets_tfidf, 100)
-nbr_clusters = index_min = min(range(len(s)), key=s.__getitem__)
-clusters = MiniBatchKMeans(n_clusters=nbr_clusters, init_size=1024, batch_size=2048, random_state=20).fit_predict(tweets_tfidf)
-
-def plot_tsne_pca(data, labels):
-    max_label = max(labels)
-    max_items = np.random.choice(range(data.shape[0]), size=3000, replace=False)
-    
-    pca = PCA(n_components=2).fit_transform(data[max_items,:].todense())
-    pp = PCA(n_components=50)
-    tsne = TSNE().fit_transform(pp.fit_transform(data[max_items,:].todense()))
-    
-    idx = np.random.choice(range(pca.shape[0]), size=300, replace=False)
-    label_subset = labels[max_items]
-    label_subset = [cm.hsv(i/max_label) for i in label_subset[idx]]
-    
-    f, ax = plt.subplots(1, 2, figsize=(14, 6))
-    
-    ax[0].scatter(pca[idx, 0], pca[idx, 1], c=label_subset)
-    ax[0].set_title('PCA Cluster Plot')
-    
-    ax[1].scatter(tsne[idx, 0], tsne[idx, 1], c=label_subset)
-    ax[1].set_title('TSNE Cluster Plot')
-
-    return pp.explained_variance_
-    
-variance = plot_tsne_pca(tweets_tfidf, clusters)
+s = find_optimal_clusters(tweets_svd, 100)
+plt.plot(range(len(s)), s)
 plt.show()
 
-plt.plot(range(len(variance)), variance)
+nbr_clusters = 20
+clusters = MiniBatchKMeans(n_clusters=nbr_clusters, init_size=1024, batch_size=2048, random_state=20).fit_predict(tweets_svd)
+
+
+max_items = np.random.choice(range(tweets_svd.shape[0]), size=2000)
+
+tsne = bh_sne(tweets_svd[max_items])
+vis_x = tsne[:, 0]
+vis_y = tsne[:, 1]
+
+plt.scatter(vis_x, vis_y, c=clusters[max_items], cmap=plt.cm.get_cmap("jet", nbr_clusters))
+plt.colorbar(ticks=range(nbr_clusters))
 plt.show()
 
-def get_top_keywords(data, clusters, labels, n_terms):
-    df = pd.DataFrame(data.todense()).groupby(clusters).mean()
-    
-    for i,r in df.iterrows():
-        print('\nCluster {}'.format(i))
-        print(','.join([labels[t] for t in np.argsort(r)[-n_terms:]]))
-            
-get_top_keywords(tweets_tfidf, clusters, tfidf.get_feature_names(), 10)
+predict = clusters
+tweets = sample
+labels = list(range(nbr_clusters))
+n_words = 10
 
+group = {}
+for l in labels:
+    group[l] = []
+for i in range(len(predict)):
+    group[predict[i]].append(i)
+most_commons = {}
+for l in labels:
+    counter = Counter([word for tweet in tweets.iloc[group[l]] for word in tweet.split()])
+    most_commons[l] = counter.most_common(n_words)
+
+n = 0
+for i in range(nbr_clusters):
+    n += len(group[i])
+    print("cluster " + str(i))
+    print(most_commons[i])
