@@ -57,35 +57,39 @@ tweets_tfidf = tfidf.fit_transform(sample)
 
 print("fin tfidf")
 
-items = np.random.choice(range(size_sample), size=3000)
 
-components = 20
-SVD = SparsePCA(n_components = components)
-SVD.fit(tweets_tfidf[items].toarray())
-tweets_svd = SVD.transform(tweets_tfidf)
+components = 9
+SVD = TruncatedSVD(n_components = components)
+tweets_svd = SVD.fit_transform(tweets_tfidf)
 
-plt.bar(range(components), SVD.explained_variance_)
-plt.show() # on voit un groupe de 3, un autre de 3 donc 6 et si on prend large, 9/10
+
+plt.bar(range(components), SVD.explained_variance_ratio_)
+plt.show() # si on prend large, 10
 
 print("fin svd")
 
-def find_optimal_clusters(data, max_k):
-    iters = range(2, max_k+1)
-    
-    sse = []
-    for k in iters:
-        sse.append(MiniBatchKMeans(n_clusters=k, init_size=1024, batch_size=2048, random_state=20).fit(data).inertia_)
-        print('Fit {} clusters'.format(k))
-        
-    return sse
+ran = range(1, 162, 20)
+ks = list(ran)
 
-s = find_optimal_clusters(tweets_svd, 100)
-plt.plot(range(len(s)), s)
+def kmeans_go(k):
+    print("kmeans " + str(k))
+    res = KMeans(n_clusters=k).fit(tweets_svd)
+    print("kmeans " + str(k) + " fini")
+    return res
+
+num_cores = multiprocessing.cpu_count()
+Kmeans = Parallel(n_jobs=num_cores-1)(delayed(kmeans_go)(i) for i in ran)
+
+inerties = []
+
+for k in Kmeans:
+    inerties.append(k.inertia_)
+
+plt.plot(ks, inerties, 'o-')
 plt.show()
 
 nbr_clusters = 20
 clusters = MiniBatchKMeans(n_clusters=nbr_clusters, init_size=1024, batch_size=2048, random_state=20).fit_predict(tweets_svd)
-
 
 max_items = np.random.choice(range(tweets_svd.shape[0]), size=2000)
 
