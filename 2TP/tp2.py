@@ -3,51 +3,59 @@ import numpy as np
 import pandas as pd
 from scipy import stats as st
 import re
-from nltk.stem import WordNetLemmatizer
 from joblib import Parallel, delayed
 import multiprocessing
 import matplotlib.pyplot as plt
 from sklearn.cluster import KMeans
-from sklearn.feature_extraction.text import CountVectorizer
-from sklearn.feature_extraction.text import TfidfTransformer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from nltk.stem import WordNetLemmatizer
 from sklearn.decomposition import TruncatedSVD
 from collections import Counter
 import csv
 from sklearn.cluster import MiniBatchKMeans
-from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 import matplotlib.cm as cm
-from sklearn.decomposition import SparsePCA
-import seaborn as sns
-from sklearn.datasets import load_digits
 from tsne import bh_sne
 
+# Seulement les mots les plus fréquents, c'est à dire les résultats finaux seront affichés, 
+# pour afficher les étapes intermédiaires, décommenter les "plt.*"
 
+
+########################### RECUPERATION DES DONNEES ###########################
 
 
 filename = "tweets_lang.csv"
 
-dataset = pd.read_csv(filename, sep=";")
+dataset = pd.read_csv(filename, sep=";") ##### Attention, le séparateur des données dans le dataset doit etre ";"
+
 # On ne garde que les tweets en anglais et ceux qui n'ont pas été coupés
+################################################################################################################################
+#                                                                                                                              #
+# ATTENTION !!! Le dataset doit contenir non seulement le texte des tweets mais aussi les attributs "lang" et "truncated" !!!! #
+#                                                                                                                              #
+################################################################################################################################
 dataset = dataset[(dataset["lang"] == "en") & (dataset["truncated"] == False)]
 print("fin dataset")
 
-size_sample = 100000
+
+########################### PREPROCESSING et ECHANTILLONNAGE ###########################
 
 lemmatizer = WordNetLemmatizer()
 def clean_tweet(tweet):
-    clean = re.sub(r"(http|@|#)\S*", "", tweet.lower())
-    tokens = nltk.word_tokenize(re.sub(r"rt|”|'s|—|'|\.|,|\"|%|`|’|‘|–|\||“|▸", "", clean))
+    clean = re.sub(r"(http|@|#)\S*", "", tweet.lower())  # On enlebe les URLs, les hastags et les références aux autres comptes
+    tokens = nltk.word_tokenize(re.sub(r"rt|”|'s|—|'|\.|,|\"|%|`|’|‘|–|\||“|▸", "", clean))   # on supprime les caractère spéciaux
     tags = nltk.pos_tag(tokens)
-    nouns = [word for word,pos in tags if ((pos == 'NN' or pos == 'NNP' or pos == 'NNS' or pos == 'NNPS' ) and word != "i" and word != "s")]
-    return " ".join([lemmatizer.lemmatize(noun) for noun in nouns])
+    nouns = [word for word,pos in tags if ((pos == 'NN' or pos == 'NNP' or pos == 'NNS' or pos == 'NNPS' ) # on ne garde que les noms/noms propres
+    and word != "i" and word != "s" and len(word) > 3)]
+    return " ".join([lemmatizer.lemmatize(noun) for noun in nouns]) # On lemmatize
+
+size_sample = 100000
 
 sample = dataset.sample(n=size_sample)["text"]
 sample = sample.map(clean_tweet)
 
-del dataset
+del dataset # nous n'avons plus besoin du dataset en entier, nous ne gardons que notre echantillon
+print("fin clean")
 
 tfidf = TfidfVectorizer(
     ngram_range=(1,2),
@@ -57,18 +65,21 @@ tweets_tfidf = tfidf.fit_transform(sample)
 
 print("fin tfidf")
 
+########################### SVD ###########################
 
-components = 9
+components = 5
 SVD = TruncatedSVD(n_components = components)
 tweets_svd = SVD.fit_transform(tweets_tfidf)
 
-
-plt.bar(range(components), SVD.explained_variance_ratio_)
-plt.show() # si on prend large, 10
-
 print("fin svd")
 
-ran = range(1, 162, 20)
+#plt.bar(range(components), SVD.explained_variance_ratio_)
+#plt.show() # On prendra les 5 première composantes
+
+########################### K-MEANS ###########################
+
+
+ran = range(1, 21, 1)
 ks = list(ran)
 
 def kmeans_go(k):
@@ -78,44 +89,62 @@ def kmeans_go(k):
     return res
 
 num_cores = multiprocessing.cpu_count()
-Kmeans = Parallel(n_jobs=num_cores-1)(delayed(kmeans_go)(i) for i in ran)
+Kmeans = Parallel(n_jobs=num_cores-1)(delayed(kmeans_go)(i) for i in ran) # parallélisation, cela laissera seulement un thread de disponible sur la machine
 
 inerties = []
 
 for k in Kmeans:
     inerties.append(k.inertia_)
 
-plt.plot(ks, inerties, 'o-')
-plt.show()
+print("fin des differents k-means")
 
-nbr_clusters = 20
+#plt.plot(ks, inerties, 'o-')
+#plt.show()
+
+nbr_clusters = 12
 clusters = MiniBatchKMeans(n_clusters=nbr_clusters, init_size=1024, batch_size=2048, random_state=20).fit_predict(tweets_svd)
 
-max_items = np.random.choice(range(tweets_svd.shape[0]), size=2000)
+print("fin k-means")
+
+########################### T-SNE ###########################
+
+max_items = np.random.choice(range(tweets_svd.shape[0]), size=2000) # cela ne sert à rien d'afficher 100000 tweets, un sous-echantillon de 2000 tweets suffira
 
 tsne = bh_sne(tweets_svd[max_items])
-vis_x = tsne[:, 0]
-vis_y = tsne[:, 1]
+axe_x = tsne[:, 0] # premier axe
+axe_y = tsne[:, 1] # deuxième axe
 
-plt.scatter(vis_x, vis_y, c=clusters[max_items], cmap=plt.cm.get_cmap("jet", nbr_clusters))
-plt.colorbar(ticks=range(nbr_clusters))
-plt.show()
+plt.scatter(axe_x, axe_y, c=clusters[max_items], cmap=plt.cm.get_cmap("jet", nbr_clusters))
 
-predict = clusters
-tweets = sample
+print("fin t-sne")
+
+#plt.colorbar(ticks=range(nbr_clusters))
+#plt.show()
+
+
+########################### Calcul des mots les plus fréquents dans un cluster ###########################
+
+
 labels = list(range(nbr_clusters))
 n_words = 10
 
+# On trie d'abord les tweets par leur cluster d'appartenance
 group = {}
 for l in labels:
     group[l] = []
-for i in range(len(predict)):
-    group[predict[i]].append(i)
+for i in range(len(clusters)):
+    group[clusters[i]].append(i)
+
+
+# Puis pour chaque cluster, nous calculons les mots les plus fréquents
 most_commons = {}
 for l in labels:
-    counter = Counter([word for tweet in tweets.iloc[group[l]] for word in tweet.split()])
+    counter = Counter([word for tweet in sample.iloc[group[l]] for word in tweet.split()])
     most_commons[l] = counter.most_common(n_words)
 
+
+# Affichage des mots les plus fréquents, bien sur selon l'echantillonnage, 
+# les résultats finaux seront plus ou moins identiques à ceux indiqués dans le rapport
 n = 0
 for i in range(nbr_clusters):
     n += len(group[i])
